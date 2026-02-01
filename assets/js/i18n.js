@@ -1,0 +1,97 @@
+export const STORAGE_KEY_LANG = 'bt_lang';
+
+const translations = {
+    de: {
+        login: 'Login',
+        serverPassword: 'Server Passwort',
+        enter: 'Anmelden',
+        logout: 'Abmelden',
+        passwordWrong: 'Passwort falsch',
+        reconnecting: 'Verbindung unterbrochen \u2013 Reconnecting\u2026',
+        connectionLost: 'Verbindung verloren. Bitte Seite neu laden.',
+        lobby: 'Lobby',
+        you: 'Du',
+        empty: 'Leer',
+        leave: 'Verlassen',
+        join: 'Beitreten',
+        setup: 'Setup',
+        name: 'Name',
+        micInput: 'Mikrofon / Input',
+        unknownDevice: 'Unbekanntes Ger\u00e4t',
+        micVolume: 'Mikrofon Lautst\u00e4rke',
+        micGate: 'Mikrofon Gate',
+        gateOn: 'An',
+        gateOff: 'Aus',
+        gateHint: 'Audio unter dem Strich wird stummgeschaltet.',
+        speakerOutput: 'Lautsprecher / Output',
+        defaultOutput: 'Standard-Ausgang',
+        loopback: 'Test Audio (Loopback)',
+        masterVolume: 'Master Volume',
+        audioProcessing: 'Audio Processing',
+        echoCancellation: 'Echo Cancellation',
+        noiseSuppression: 'Noise Suppression',
+        autoGainControl: 'Auto Gain Control',
+        saveAndGo: 'Speichern',
+        roomPassword: 'Raum-Passwort',
+        cancel: 'Abbrechen',
+        joinRoom: 'Beitreten',
+        close: 'Schlie\u00dfen',
+        imprint: 'Impressum',
+        privacy: 'Datenschutz',
+        micRequired: 'Mikrofon Zugriff ben\u00f6tigt',
+        wrongRoomPassword: 'Falsches Raum-Passwort!',
+        darkMode: 'Dark Mode',
+    },
+    en: {
+        login: 'Login',
+        serverPassword: 'Server Password',
+        enter: 'Enter',
+        logout: 'Logout',
+        passwordWrong: 'Wrong password',
+        reconnecting: 'Connection lost \u2013 Reconnecting\u2026',
+        connectionLost: 'Connection lost. Please reload the page.',
+        lobby: 'Lobby',
+        you: 'You',
+        empty: 'Empty',
+        leave: 'Leave',
+        join: 'Join',
+        setup: 'Setup',
+        name: 'Name',
+        micInput: 'Microphone / Input',
+        unknownDevice: 'Unknown Device',
+        micVolume: 'Microphone Volume',
+        micGate: 'Microphone Gate',
+        gateOn: 'On',
+        gateOff: 'Off',
+        gateHint: 'Audio below the line will be muted.',
+        speakerOutput: 'Speaker / Output',
+        defaultOutput: 'Default Output',
+        loopback: 'Test Audio (Loopback)',
+        masterVolume: 'Master Volume',
+        audioProcessing: 'Audio Processing',
+        echoCancellation: 'Echo Cancellation',
+        noiseSuppression: 'Noise Suppression',
+        autoGainControl: 'Auto Gain Control',
+        saveAndGo: 'Save',
+        roomPassword: 'Room Password',
+        cancel: 'Cancel',
+        joinRoom: 'Join',
+        close: 'Close',
+        imprint: 'Imprint',
+        privacy: 'Privacy Policy',
+        micRequired: 'Microphone access required',
+        wrongRoomPassword: 'Wrong room password!',
+        darkMode: 'Dark Mode',
+    }
+};
+
+export function detectLanguage() {
+    const stored = localStorage.getItem(STORAGE_KEY_LANG);
+    if (stored && translations[stored]) return stored;
+    const nav = navigator.language?.substring(0, 2);
+    return nav === 'de' ? 'de' : 'en';
+}
+
+export function translate(lang, key) {
+    return translations[lang]?.[key] || translations.en[key] || key;
+}

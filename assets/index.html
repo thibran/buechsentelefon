@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Buechsentelefon</title>
+    <style>[x-cloak] { display: none !important; }</style>
+    <link rel="stylesheet" href="/assets/css/layout.css">
+    <link rel="stylesheet" href="/assets/css/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📞</text></svg>">
+    <script type="module" src="/assets/js/app.js"></script>
+</head>
+
+<body x-data="buechseApp" x-init="initApp()">
+
+    <!-- Top Controls -->
+    <div class="top-controls">
+        <select class="tc-btn" x-model="lang" @change="setLang(lang)">
+            <option value="de">DE</option>
+            <option value="en">EN</option>
+        </select>
+        <button x-show="authenticated" @click="logout" class="tc-btn" x-cloak x-text="t('logout')"></button>
+    </div>
+
+    <!-- Footer: Impressum & Datenschutz (only if configured) -->
+    <div class="footer-links" x-show="config.legal?.has_imprint || config.legal?.has_privacy_policy" x-cloak>
+        <a x-show="config.legal?.has_imprint" @click.prevent.stop="openLegal('impressum')" href="#" x-text="t('imprint')"></a>
+        <a x-show="config.legal?.has_privacy_policy" @click.prevent.stop="openLegal('datenschutz')" href="#" x-text="t('privacy')"></a>
+    </div>
+
+    <div class="container">
+
+        <!-- ===== LOGIN ===== -->
+        <div x-show="!authenticated" class="main-box login-box" x-transition x-cloak>
+            <h2 style="text-align: center; margin-bottom: 10px;" x-text="t('login')"></h2>
+            <p style="text-align:center; margin-bottom:20px;" :style="{ color: 'var(--text-muted)' }" x-text="config.title"></p>
+            <template x-if="config.branding?.has_logo">
+                <img src="/branding/logo" class="login-logo" alt="Logo">
+            </template>
+            <form @submit.prevent="login">
+                <input type="password" x-model="passwordInput" :placeholder="t('serverPassword')" required autofocus>
+                <button type="submit" class="btn-primary" x-text="t('enter')"></button>
+                <p x-show="loginError" x-text="loginError"
+                    style="color: var(--danger); text-align:center; margin-top:10px; font-size:0.9rem;"></p>
+            </form>
+        </div>
+
+        <!-- ===== APP ===== -->
+        <div x-show="authenticated" class="main-box" x-transition x-cloak>
+
+            <!-- Header Banner (optional) -->
+            <template x-if="config.branding?.has_header_banner">
+                <img src="/branding/header-banner" class="header-banner" alt="">
+            </template>
+
+            <header class="app-header">
+                <div class="server-name" x-text="config.title"></div>
+                <div class="header-controls">
+                    <button x-show="currentRoom !== 'Lobby'" @click="toggleMute" class="btn-icon"
+                        :class="isMuted ? 'btn-active' : ''"
+                        x-text="isMuted ? '🔇' : '🎙️'" x-cloak></button>
+                    <button class="btn-icon" @click="openSettings">⚙️</button>
+                </div>
+            </header>
+
+            <!-- Connection Status -->
+            <template x-if="connectionStatus === 'reconnecting'">
+                <div class="connection-banner reconnecting" x-transition x-text="t('reconnecting')"></div>
+            </template>
+            <template x-if="connectionStatus === 'failed'">
+                <div class="connection-banner" x-transition x-text="t('connectionLost')"></div>
+            </template>
+
+            <div class="content-area">
+                <!-- Lobby -->
+                <div class="lobby-container">
+                    <div class="lobby-title" x-text="t('lobby')"></div>
+                    <div class="lobby-user-list">
+                        <template x-for="user in getLobbyUsers()" :key="user.id">
+                            <div class="user-item">
+                                <div class="user-avatar"></div>
+                                <span x-text="user.name + (user.name === currentUser?.name ? ' (' + t('you') + ')' : '')"></span>
+                            </div>
+                        </template>
+                        <span x-show="getLobbyUsers().length === 0"
+                            style="font-size:0.8rem; padding:5px;" :style="{ color: 'var(--text-muted)' }" x-text="t('empty')"></span>
+                    </div>
+                </div>
+
+                <!-- Rooms -->
+                <ul class="room-list">
+                    <template x-for="room in rooms" :key="room.name">
+                        <li class="room-item" :class="currentRoom === room.name ? 'active-room' : ''">
+
+                            <!-- Room Banner (optional) -->
+                            <template x-if="room.has_banner">
+                                <img :src="'/branding/room-banner/' + encodeURIComponent(room.name)"
+                                    class="room-banner" alt="">
+                            </template>
+
+                            <div class="room-header">
+                                <span class="room-name">
+                                    <span x-text="room.name"></span>
+                                    <template x-if="room.is_locked">
+                                        <span class="room-lock">🔒</span>
+                                    </template>
+                                </span>
+                                <template x-if="currentRoom === room.name">
+                                    <button @click.stop="leaveRoom()" class="leave-btn" x-text="t('leave')"></button>
+                                </template>
+                                <template x-if="currentRoom !== room.name">
+                                    <button @click.stop="joinRoom(room)" class="join-btn" x-text="t('join')"></button>
+                                </template>
+                            </div>
+
+                            <!-- Users in Room -->
+                            <div class="user-list">
+                                <template x-for="user in getUsersInRoom(room.name)" :key="user.id">
+                                    <div class="user-item">
+                                        <div class="user-avatar"
+                                            :id="'avatar-' + (user.name === currentUser?.name ? 'local' : user.id)"
+                                            :class="[
+                                                currentRoom === room.name && user.name !== currentUser?.name ? getPeerConnectionClass(user.id) : '',
+                                                currentRoom === room.name && user.name !== currentUser?.name && isPeerMuted(user.name) ? 'peer-muted' : ''
+                                            ]">
+                                        </div>
+                                        <span class="user-name"
+                                            x-text="user.name + (user.name === currentUser?.name ? ' (' + t('you') + ')' : '')"></span>
+
+                                        <template x-if="currentRoom === room.name && user.name !== currentUser?.name">
+                                            <div class="user-controls" x-data="{ s: getPeerSetting(user.name) }">
+                                                <input type="range" class="volume-slider" min="0" max="100"
+                                                    x-model="s.vol"
+                                                    @input="updatePeerVolume(user.id, user.name, s.vol)"
+                                                    @click.stop>
+                                                <button class="mini-btn" :class="s.muted ? 'active' : ''"
+                                                    @click.stop="togglePeerMute(user.id, user.name); s.muted = !s.muted"
+                                                    x-text="s.muted ? '🔇' : '🔊'">
+                                                </button>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                            </div>
+                        </li>
+                    </template>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== SETTINGS MODAL ===== -->
+    <template x-if="showSettings">
+        <div class="modal-overlay" @click.self="closeSettingsIfAllowed">
+            <div class="modal">
+                <h3 x-text="t('setup')"></h3>
+                <form @submit.prevent="saveSettings">
+                    <div class="form-group">
+                        <label x-text="t('name')"></label>
+                        <input type="text" x-model="settingsForm.name" required maxlength="20">
+                    </div>
+
+                    <div class="form-group">
+                        <label x-text="t('micInput')"></label>
+                        <select x-model="settingsForm.audioInput" @change="restartMicPreview">
+                            <template x-for="d in devices.inputs" :key="d.deviceId">
+                                <option :value="d.deviceId" x-text="d.label || t('unknownDevice')"></option>
+                            </template>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label x-text="t('micVolume') + ': ' + Math.round(settingsForm.micGain * 100) + '%'"></label>
+                        <div class="range-group">
+                            <input type="range" x-model="settingsForm.micGain" min="0" max="2" step="0.01"
+                                @input="updateRtcSettings">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                            <label x-text="t('micGate')"></label>
+                            <span style="font-size:0.8rem;" :style="{ color: 'var(--text-muted)' }"
+                                x-text="settingsForm.micThreshold > 0 ? t('gateOn') : t('gateOff')"></span>
+                        </div>
+
+                        <div class="mic-preview-bar">
+                            <div id="micPreviewFill" class="mic-preview-fill"></div>
+                            <div class="threshold-marker" :style="'left: ' + settingsForm.micThreshold + '%'"></div>
+                        </div>
+
+                        <div class="range-group">
+                            <input type="range" x-model="settingsForm.micThreshold" min="0" max="100"
+                                @input="updateRtcSettings">
+                        </div>
+                        <p style="font-size:0.75rem; margin-top:-10px;" :style="{ color: 'var(--text-muted)' }"
+                            x-text="t('gateHint')"></p>
+                    </div>
+
+                    <div class="form-group">
+                        <label x-text="t('speakerOutput')"></label>
+                        <select x-model="settingsForm.audioOutput" @change="updateRtcSettings">
+                            <template x-for="d in devices.outputs" :key="d.deviceId">
+                                <option :value="d.deviceId" x-text="d.label || t('defaultOutput')"></option>
+                            </template>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <input id="loopback" type="checkbox" x-model="loopbackEnabled" @change="toggleLoopback">
+                        <label for="loopback" style="display:inline; margin-left:5px;" x-text="t('loopback')"></label>
+                    </div>
+
+                    <div class="form-group">
+                        <label x-text="t('masterVolume') + ': ' + Math.round(settingsForm.masterVolume * 100) + '%'"></label>
+                        <div class="range-group">
+                            <input type="range" x-model="settingsForm.masterVolume" min="0" max="1" step="0.01"
+                                @input="updateRtcSettings">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <div style="font-size:0.85rem; margin-bottom:8px; font-weight:600;" x-text="t('audioProcessing')"></div>
+                        <label class="checkbox-label">
+                            <input type="checkbox" x-model="settingsForm.echoCancellation">
+                            <span x-text="t('echoCancellation')"></span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" x-model="settingsForm.noiseSuppression">
+                            <span x-text="t('noiseSuppression')"></span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" x-model="settingsForm.autoGainControl">
+                            <span x-text="t('autoGainControl')"></span>
+                        </label>
+                    </div>
+
+                    <div style="text-align: right; margin-top: 20px;">
+                        <button type="submit" class="btn-primary" style="width: auto; padding: 8px 20px;" x-text="t('saveAndGo')"></button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </template>
+
+    <!-- ===== ROOM PASSWORD MODAL ===== -->
+    <template x-if="roomPasswordPrompt">
+        <div class="room-pw-overlay" @click.self="roomPasswordPrompt = null; roomPasswordInput = ''">
+            <div class="room-pw-modal">
+                <h4 x-text="'🔒 ' + roomPasswordPrompt"></h4>
+                <form @submit.prevent="submitRoomPassword">
+                    <input type="password" x-model="roomPasswordInput" :placeholder="t('roomPassword')" required autofocus>
+                    <div class="pw-actions">
+                        <button type="button" @click="roomPasswordPrompt = null; roomPasswordInput = ''" x-text="t('cancel')"></button>
+                        <button type="submit" class="pw-submit" x-text="t('joinRoom')"></button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </template>
+
+    <!-- ===== THEME TOGGLE ===== -->
+    <div class="theme-switch-container">
+        <span class="theme-switch-label" x-text="t('darkMode')"></span>
+        <label class="theme-switch">
+            <input type="checkbox" :checked="darkMode" @change="toggleTheme">
+            <span class="theme-slider"></span>
+        </label>
+    </div>
+
+    <!-- ===== LEGAL MODAL ===== -->
+    <template x-if="showLegalModal">
+        <div class="modal-overlay legal-overlay" @click.self="closeLegal">
+            <div class="modal" style="max-height: 80vh; overflow-y: auto;">
+                <h3 x-text="legalTitle"></h3>
+                <div class="legal-content" x-html="legalContent"></div>
+                <div style="text-align: right; margin-top: 20px;">
+                    <button type="button" class="btn-primary" style="width: auto; padding: 8px 20px;"
+                        @click="closeLegal" x-text="t('close')"></button>
+                </div>
+            </div>
+        </div>
+    </template>
+
+</body>
+</html>

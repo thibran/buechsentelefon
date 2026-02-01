@@ -1,0 +1,56 @@
+[package]
+name = "buechsentelefon"
+version = "0.1.0"
+edition = "2024"
+authors = ["Thibaut Brandscheid"]
+description = "A simple, secure WebRTC audio chat server"
+build = "build.rs"
+
+[dependencies]
+# CLI & Utilities
+clap = { version = "4.5", features = ["derive", "color"] }
+anyhow = "1.0"
+directories = "5.0" # For finding OS config paths
+uuid = { version = "1.21", features = ["v4", "serde"] }
+
+# Async & Runtime
+tokio = { version = "1.49", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Web Server
+axum = { version = "0.7", features = ["ws", "macros", "multipart"] }
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+tower-cookies = { version = "0.10", features = ["private"] }
+
+# Config & Data
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+futures = "0.3"
+toml = "0.8"
+toml_edit = { version = "0.22", features = ["serde"] }
+notify = "6.1"
+
+
+# Security
+# FIX: explicitly adding 'ring' provider for rustls to prevent runtime panics
+rustls = { version = "0.23", features = ["ring"] }
+argon2 = "0.5"
+rcgen = "0.13"
+rand = "0.8"
+
+# Assets
+rust-embed = "8.11"
+mime_guess = "2.0"
+
+[dev-dependencies]
+tempfile = "3"
+
+[build-dependencies]
+vergen-gitcl = { version = "9.1.0", features = ["build", "cargo", "rustc"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
