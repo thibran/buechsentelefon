@@ -4,13 +4,14 @@ version = "0.1.0"
 edition = "2024"
 authors = ["Thibaut Brandscheid"]
 description = "A simple, secure WebRTC audio chat server"
+license = "MIT"
 build = "build.rs"
 
 [dependencies]
 # CLI & Utilities
 clap = { version = "4.5", features = ["derive", "color"] }
 anyhow = "1.0"
-directories = "5.0" # For finding OS config paths
+directories = "5.0"
 uuid = { version = "1.21", features = ["v4", "serde"] }
 
 # Async & Runtime
