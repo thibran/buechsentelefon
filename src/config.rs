@@ -11,6 +11,31 @@ use std::path::Path;
 use toml_edit::{value, DocumentMut};
 use tracing::info;
 
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum UserRole {
+    Admin,
+    Standard,
+    Guest,
+}
+
+impl std::fmt::Display for UserRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UserRole::Admin => write!(f, "admin"),
+            UserRole::Standard => write!(f, "standard"),
+            UserRole::Guest => write!(f, "guest"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct UserConfig {
+    pub username: String,
+    pub password_hash: String,
+    pub role: UserRole,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AppConfig {
     pub server: ServerConfig,
@@ -18,6 +43,8 @@ pub struct AppConfig {
     pub tls: TlsConfig,
     pub webrtc: WebRtcConfig,
     pub rooms: Vec<RoomConfig>,
+    #[serde(default)]
+    pub users: Vec<UserConfig>,
     #[serde(default)]
     pub branding: BrandingConfig,
     #[serde(default)]
@@ -104,6 +131,26 @@ impl AppConfig {
     pub fn find_room(&self, name: &str) -> Option<&RoomConfig> {
         self.rooms.iter().find(|r| r.name == name)
     }
+
+    /// Returns true if named user accounts are configured.
+    /// When false, the legacy server password is used for authentication.
+    pub fn has_users(&self) -> bool {
+        !self.users.is_empty()
+    }
+
+    pub fn find_user(&self, username: &str) -> Option<&UserConfig> {
+        self.users.iter().find(|u| u.username == username)
+    }
+
+    /// Verifies username/password and returns the matching user on success.
+    pub fn authenticate_user<'a>(&'a self, username: &str, password: &str) -> Option<&'a UserConfig> {
+        let user = self.find_user(username)?;
+        if verify_hash(&user.password_hash, password) {
+            Some(user)
+        } else {
+            None
+        }
+    }
 }
 
 pub fn verify_hash(hash: &str, plain: &str) -> bool {
@@ -138,6 +185,51 @@ pub fn update_password(path: &Path, new_password: &str) -> Result<()> {
     doc["security"]["server_password_hash"] = value(password_hash);
     fs::write(path, doc.to_string())?;
 
+    Ok(())
+}
+
+pub fn add_or_update_user(
+    path: &Path,
+    username: &str,
+    password: &str,
+    role: &UserRole,
+) -> Result<()> {
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read config file: {}", path.display()))?;
+
+    let mut doc = content.parse::<DocumentMut>()?;
+    let password_hash = hash_password(password)?;
+    let role_str = role.to_string();
+
+    if doc.get("users").is_some() {
+        let users = doc["users"]
+            .as_array_of_tables_mut()
+            .context("'users' must be an array of tables ([[users]])")?;
+
+        if let Some(user_table) = users
+            .iter_mut()
+            .find(|u| u.get("username").and_then(|n| n.as_str()) == Some(username))
+        {
+            user_table["password_hash"] = value(password_hash);
+            user_table["role"] = value(role_str);
+        } else {
+            let mut new_user = toml_edit::Table::new();
+            new_user["username"] = value(username);
+            new_user["password_hash"] = value(password_hash);
+            new_user["role"] = value(role_str);
+            users.push(new_user);
+        }
+    } else {
+        let mut aot = toml_edit::ArrayOfTables::new();
+        let mut new_user = toml_edit::Table::new();
+        new_user["username"] = value(username);
+        new_user["password_hash"] = value(password_hash);
+        new_user["role"] = value(role_str);
+        aot.push(new_user);
+        doc.insert("users", toml_edit::Item::ArrayOfTables(aot));
+    }
+
+    fs::write(path, doc.to_string())?;
     Ok(())
 }
 
@@ -215,6 +307,19 @@ name = "Meeting Room"
 [[rooms]]
 name = "Gamer Ecke"
 
+# Users: Named accounts with roles (admin, standard, guest).
+# When users are configured, login requires username + password.
+# Add users via CLI: buechsentelefon add-user <USERNAME> <PASSWORD> [--role <ROLE>]
+# Roles:
+#   admin    - Full access + server administration
+#   standard - Can join all rooms (default)
+#   guest    - Can only join the Lobby
+
+# [[users]]
+# username = "admin"
+# password_hash = ""  # Set via: buechsentelefon add-user admin --role admin
+# role = "admin"
+
 [branding]
 # favicon_path = "./favicon.ico"
 # logo_path = "./logo.png"
@@ -229,7 +334,7 @@ name = "Gamer Ecke"
 # privacy_policy_path = "./datenschutz.html"
 
 [security]
-# The Argon2 hash of the server password.
+# The Argon2 hash of the server password (used when no [[users]] are configured).
 server_password_hash = "{server_password_hash}"
 session_secret = "{session_secret}"
 

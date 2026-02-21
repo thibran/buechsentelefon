@@ -108,6 +108,21 @@ pub async fn start(initial_config: AppConfig, config_path: PathBuf) -> Result<()
         warn!("SSL Mode:      Self-Signed (Development Mode)");
         warn!("               Browser will show a security warning.");
     }
+    info!("-------------------------------------------------------");
+    if initial_config.has_users() {
+        let user_count = initial_config.users.len();
+        info!(
+            "Auth Mode:     User Accounts ({} user{} configured)",
+            user_count,
+            if user_count == 1 { "" } else { "s" }
+        );
+        for user in &initial_config.users {
+            info!("               - {} [{}]", user.username, user.role);
+        }
+    } else {
+        warn!("Auth Mode:     Legacy (single server password)");
+        warn!("               Add named users: buechsentelefon add-user <NAME> <PW> --role <ROLE>");
+    }
     info!("=======================================================");
 
     axum_server::bind_rustls(addr, tls_config)

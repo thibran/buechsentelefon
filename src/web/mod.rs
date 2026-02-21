@@ -1,5 +1,6 @@
 mod ws;
 
+use crate::config::UserRole;
 use crate::server::AppState;
 use axum::{
     body::Body,
@@ -20,6 +21,7 @@ struct Asset;
 
 #[derive(Deserialize)]
 struct LoginRequest {
+    username: Option<String>,
     password: String,
 }
 
@@ -27,6 +29,16 @@ struct LoginRequest {
 struct ApiResponse {
     success: bool,
     message: String,
+}
+
+#[derive(Serialize)]
+struct AuthInfoResponse {
+    success: bool,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    role: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    username: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -62,6 +74,14 @@ struct PublicConfigResponse {
     stun_servers: Vec<String>,
     branding: BrandingInfo,
     legal: LegalInfo,
+    /// When true, login requires username + password. When false, only password is needed.
+    has_users: bool,
+}
+
+#[derive(Serialize)]
+struct ConnectedUser {
+    id: String,
+    name: String,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -83,18 +103,55 @@ pub fn router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/ws", get(ws::ws_handler))
         .route("/api/rooms", get(get_rooms_handler))
+        .route("/api/me", get(me_handler))
         .route("/api/logout", post(logout_handler))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             require_auth,
         ));
 
+    let admin = Router::new()
+        .route("/api/admin/connections", get(admin_connections_handler))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_admin,
+        ));
+
     public
         .merge(protected)
+        .merge(admin)
         .layer(CookieManagerLayer::new())
         .layer(middleware::from_fn(security_headers))
         .with_state(state)
 }
+
+// --- Auth Helpers ---
+
+/// Returns the session username from the cookie, or None if not authenticated.
+async fn session_username(state: &AppState, cookies: &Cookies) -> Option<String> {
+    let key = state.cookie_key.read().await.clone();
+    let private_cookies = cookies.private(&key);
+    private_cookies
+        .get("bt_session")
+        .map(|c| c.value().to_string())
+}
+
+/// Returns the role for the current session. Legacy sessions get Standard.
+pub async fn session_role(state: &AppState, cookies: &Cookies) -> UserRole {
+    let Some(username) = session_username(state, cookies).await else {
+        return UserRole::Standard;
+    };
+    if username == "_server" {
+        return UserRole::Standard;
+    }
+    let config = state.config.read().await;
+    config
+        .find_user(&username)
+        .map(|u| u.role.clone())
+        .unwrap_or(UserRole::Standard)
+}
+
+// --- Middleware ---
 
 async fn require_auth(
     State(state): State<AppState>,
@@ -109,6 +166,20 @@ async fn require_auth(
         next.run(req).await
     } else {
         StatusCode::UNAUTHORIZED.into_response()
+    }
+}
+
+async fn require_admin(
+    State(state): State<AppState>,
+    cookies: Cookies,
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    let role = session_role(&state, &cookies).await;
+    if role == UserRole::Admin {
+        next.run(req).await
+    } else {
+        StatusCode::FORBIDDEN.into_response()
     }
 }
 
@@ -142,6 +213,7 @@ async fn get_config_handler(State(state): State<AppState>) -> Json<PublicConfigR
             .clone()
             .unwrap_or_else(|| "Buechsentelefon".to_string()),
         stun_servers: config.webrtc.stun_servers.clone(),
+        has_users: config.has_users(),
         branding: BrandingInfo {
             has_favicon: config.branding.favicon_path.is_some(),
             has_logo: config.branding.logo_path.is_some(),
@@ -192,45 +264,102 @@ async fn login_handler(
 
     let config = state.config.read().await;
 
-    if config.verify_password(&payload.password) {
-        let key = state.cookie_key.read().await.clone();
-        let private_cookies = cookies.private(&key);
+    let (session_val, role, username) = if config.has_users() {
+        // User-based authentication: username is required
+        let Some(ref uname) = payload.username else {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(ApiResponse {
+                    success: false,
+                    message: "Username is required".into(),
+                }),
+            )
+                .into_response();
+        };
 
-        let mut cookie = Cookie::new("bt_session", "authenticated");
-        cookie.set_path("/");
-        cookie.set_http_only(true);
-        cookie.set_secure(true);
-        cookie.set_same_site(tower_cookies::cookie::SameSite::Strict);
+        match config.authenticate_user(uname, &payload.password) {
+            Some(user) => (
+                uname.clone(),
+                user.role.to_string(),
+                Some(uname.clone()),
+            ),
+            None => {
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(ApiResponse {
+                        success: false,
+                        message: "Invalid username or password".into(),
+                    }),
+                )
+                    .into_response();
+            }
+        }
+    } else {
+        // Legacy: single server password
+        if config.verify_password(&payload.password) {
+            ("_server".to_string(), "standard".to_string(), None)
+        } else {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(ApiResponse {
+                    success: false,
+                    message: "Invalid password".into(),
+                }),
+            )
+                .into_response();
+        }
+    };
 
-        private_cookies.add(cookie);
+    let key = state.cookie_key.read().await.clone();
+    let private_cookies = cookies.private(&key);
 
-        return Json(ApiResponse {
-            success: true,
-            message: "Login successful".into(),
-        })
-        .into_response();
-    }
+    let mut cookie = Cookie::new("bt_session", session_val);
+    cookie.set_path("/");
+    cookie.set_http_only(true);
+    cookie.set_secure(true);
+    cookie.set_same_site(tower_cookies::cookie::SameSite::Strict);
 
-    (
-        StatusCode::UNAUTHORIZED,
-        Json(ApiResponse {
-            success: false,
-            message: "Invalid password".into(),
-        }),
-    )
-        .into_response()
+    private_cookies.add(cookie);
+
+    Json(AuthInfoResponse {
+        success: true,
+        message: "Login successful".into(),
+        role: Some(role),
+        username,
+    })
+    .into_response()
 }
 
 async fn check_auth_handler(State(state): State<AppState>, cookies: Cookies) -> Response {
     let key = state.cookie_key.read().await.clone();
     let private_cookies = cookies.private(&key);
 
-    if private_cookies.get("bt_session").is_some() {
-        return Json(ApiResponse {
-            success: true,
-            message: "Authorized".into(),
-        })
-        .into_response();
+    if let Some(cookie) = private_cookies.get("bt_session") {
+        let session_val = cookie.value().to_string();
+
+        if session_val == "_server" {
+            return Json(AuthInfoResponse {
+                success: true,
+                message: "Authorized".into(),
+                role: Some("standard".to_string()),
+                username: None,
+            })
+            .into_response();
+        }
+
+        let config = state.config.read().await;
+        if let Some(user) = config.find_user(&session_val) {
+            return Json(AuthInfoResponse {
+                success: true,
+                message: "Authorized".into(),
+                role: Some(user.role.to_string()),
+                username: Some(user.username.clone()),
+            })
+            .into_response();
+        }
+
+        // Session references a user that no longer exists — treat as unauthorized
+        return StatusCode::UNAUTHORIZED.into_response();
     }
 
     (
@@ -241,6 +370,34 @@ async fn check_auth_handler(State(state): State<AppState>, cookies: Cookies) -> 
         }),
     )
         .into_response()
+}
+
+async fn me_handler(State(state): State<AppState>, cookies: Cookies) -> Response {
+    let key = state.cookie_key.read().await.clone();
+    let private_cookies = cookies.private(&key);
+
+    if let Some(cookie) = private_cookies.get("bt_session") {
+        let session_val = cookie.value().to_string();
+
+        if session_val == "_server" {
+            return Json(serde_json::json!({
+                "username": null,
+                "role": "standard"
+            }))
+            .into_response();
+        }
+
+        let config = state.config.read().await;
+        if let Some(user) = config.find_user(&session_val) {
+            return Json(serde_json::json!({
+                "username": user.username,
+                "role": user.role.to_string()
+            }))
+            .into_response();
+        }
+    }
+
+    StatusCode::UNAUTHORIZED.into_response()
 }
 
 async fn logout_handler(State(state): State<AppState>, cookies: Cookies) -> impl IntoResponse {
@@ -255,6 +412,27 @@ async fn logout_handler(State(state): State<AppState>, cookies: Cookies) -> impl
         success: true,
         message: "Logged out".into(),
     })
+}
+
+// --- Admin Handlers ---
+
+async fn admin_connections_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let rooms = state.rooms.read().await;
+    let room_data: std::collections::HashMap<String, Vec<ConnectedUser>> = rooms
+        .iter()
+        .map(|(name, users)| {
+            let user_list = users
+                .iter()
+                .map(|u| ConnectedUser {
+                    id: u.id.to_string(),
+                    name: u.name.clone(),
+                })
+                .collect();
+            (name.clone(), user_list)
+        })
+        .collect();
+
+    Json(serde_json::json!({ "rooms": room_data }))
 }
 
 // --- Branding Handlers ---

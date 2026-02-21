@@ -39,7 +39,10 @@
                 <img src="/branding/logo" class="login-logo" alt="Logo">
             </template>
             <form @submit.prevent="login">
-                <input type="password" x-model="passwordInput" :placeholder="t('serverPassword')" required autofocus>
+                <template x-if="config.has_users">
+                    <input type="text" x-model="usernameInput" :placeholder="t('username')" required autocomplete="username">
+                </template>
+                <input type="password" x-model="passwordInput" :placeholder="t('serverPassword')" required :autofocus="!config.has_users" autocomplete="current-password">
                 <button type="submit" class="btn-primary" x-text="t('enter')"></button>
                 <p x-show="loginError" x-text="loginError"
                     style="color: var(--danger); text-align:center; margin-top:10px; font-size:0.9rem;"></p>
@@ -57,6 +60,9 @@
             <header class="app-header">
                 <div class="server-name" x-text="config.title"></div>
                 <div class="header-controls">
+                    <template x-if="roleBadge()">
+                        <span class="role-badge" :class="'role-' + userRole" x-text="roleBadge()"></span>
+                    </template>
                     <button x-show="currentRoom !== 'Lobby'" @click="toggleMute" class="btn-icon"
                         :class="isMuted ? 'btn-active' : ''"
                         x-text="isMuted ? '🔇' : '🎙️'" x-cloak></button>
@@ -110,7 +116,11 @@
                                     <button @click.stop="leaveRoom()" class="leave-btn" x-text="t('leave')"></button>
                                 </template>
                                 <template x-if="currentRoom !== room.name">
-                                    <button @click.stop="joinRoom(room)" class="join-btn" x-text="t('join')"></button>
+                                    <button @click.stop="isGuest() ? null : joinRoom(room)"
+                                        class="join-btn"
+                                        :disabled="isGuest()"
+                                        :title="isGuest() ? t('guestOnly') : ''"
+                                        x-text="isGuest() ? t('guestOnly') : t('join')"></button>
                                 </template>
                             </div>
 

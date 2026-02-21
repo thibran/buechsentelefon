@@ -3,9 +3,9 @@ mod config;
 mod server;
 mod web;
 
-use args::{Args, Commands};
+use args::{Args, Commands, RoleArg};
 use clap::Parser;
-use config::{update_password, update_room_password, AppConfig};
+use config::{add_or_update_user, update_password, update_room_password, AppConfig, UserRole};
 use std::path::PathBuf;
 use tracing::{error, info};
 
@@ -83,6 +83,33 @@ async fn main() -> anyhow::Result<()> {
                     Ok(_) => println!("Success: Password updated!"),
                     Err(e) => error!("Failed to update password: {}", e),
                 }
+            }
+        }
+
+        Some(Commands::AddUser {
+            username,
+            password,
+            role,
+        }) => {
+            if !config_path.exists() {
+                let _ = AppConfig::load_or_create(&config_path)?;
+            }
+
+            let user_role = match role {
+                RoleArg::Admin => UserRole::Admin,
+                RoleArg::Standard => UserRole::Standard,
+                RoleArg::Guest => UserRole::Guest,
+            };
+
+            println!(
+                "Adding/updating user '{}' ({}) in: {}",
+                username,
+                user_role,
+                config_path.display()
+            );
+            match add_or_update_user(&config_path, &username, &password, &user_role) {
+                Ok(_) => println!("Success: User '{}' saved with role '{}'!", username, user_role),
+                Err(e) => error!("Failed to save user: {}", e),
             }
         }
     }
