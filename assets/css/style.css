@@ -569,3 +569,33 @@ label {
 .theme-switch input:checked + .theme-slider::before {
     transform: translateX(20px);
 }
+
+/* ===== Role Badge ===== */
+.role-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    background: var(--border);
+    color: var(--text-muted);
+}
+
+.role-badge.role-admin {
+    background: rgba(220, 53, 69, 0.15);
+    color: #dc3545;
+}
+
+.role-badge.role-guest {
+    background: rgba(101, 103, 107, 0.15);
+    color: var(--text-muted);
+}
+
+/* Disabled join button for guests */
+.join-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+}

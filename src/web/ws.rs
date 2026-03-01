@@ -1,5 +1,6 @@
-use crate::config::verify_hash;
+use crate::config::{verify_hash, UserRole};
 use crate::server::{AppState, User};
+use crate::web::session_role;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -12,6 +13,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
+use tower_cookies::Cookies;
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -54,11 +56,13 @@ pub enum ClientMessage {
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
+    cookies: Cookies,
 ) -> impl IntoResponse {
-    ws.on_upgrade(|socket| handle_socket(socket, state))
+    let role = session_role(&state, &cookies).await;
+    ws.on_upgrade(move |socket| handle_socket(socket, state, role))
 }
 
-async fn handle_socket(socket: WebSocket, state: AppState) {
+async fn handle_socket(socket: WebSocket, state: AppState, role: UserRole) {
     let (mut sender, mut receiver) = socket.split();
     let (tx, mut rx) = mpsc::unbounded_channel();
 
@@ -102,8 +106,21 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                         continue;
                     }
 
-                    let config = state.config.read().await;
                     let is_lobby = room == LOBBY;
+
+                    // Guests can only join the Lobby
+                    if role == UserRole::Guest && !is_lobby {
+                        let _ = tx.send(Message::Text(
+                            json!({
+                                "type": "error",
+                                "message": "Guests can only join the Lobby"
+                            })
+                            .to_string(),
+                        ));
+                        continue;
+                    }
+
+                    let config = state.config.read().await;
                     let room_config = config.find_room(&room);
 
                     if !is_lobby && room_config.is_none() {

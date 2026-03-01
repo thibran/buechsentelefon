@@ -17,10 +17,13 @@ function applyTheme(theme) {
 }
 
 const buechseAppComponent = () => ({
-    config: { title: "Loading...", stun_servers: [], branding: {}, legal: {} },
+    config: { title: "Loading...", stun_servers: [], branding: {}, legal: {}, has_users: false },
     authenticated: false,
+    usernameInput: '',
     passwordInput: '',
     loginError: '',
+    userRole: 'standard',
+    sessionUsername: null,
     currentUser: null,
     showSettings: false,
     showLegalModal: false,
@@ -81,8 +84,11 @@ const buechseAppComponent = () => ({
             rtc.setStunServers(this.config.stun_servers);
         }
 
-        if (await API.checkAuth()) {
+        const authInfo = await API.checkAuth();
+        if (authInfo) {
             this.authenticated = true;
+            this.userRole = authInfo.role || 'standard';
+            this.sessionUsername = authInfo.username || null;
             this.startSession();
         }
 
@@ -163,14 +169,31 @@ const buechseAppComponent = () => ({
     },
 
     async login() {
-        const res = await API.login(this.passwordInput);
+        const username = this.config.has_users ? this.usernameInput : null;
+        const res = await API.login(username, this.passwordInput);
         if (res.success) {
             this.authenticated = true;
             this.loginError = '';
+            this.userRole = res.role || 'standard';
+            this.sessionUsername = res.username || null;
             this.startSession();
         } else {
             this.loginError = res.message || this.t('passwordWrong');
         }
+    },
+
+    isGuest() {
+        return this.userRole === 'guest';
+    },
+
+    isAdmin() {
+        return this.userRole === 'admin';
+    },
+
+    roleBadge() {
+        if (this.userRole === 'admin') return this.t('roleAdmin');
+        if (this.userRole === 'guest') return this.t('roleGuest');
+        return null;
     },
 
     async logout() {

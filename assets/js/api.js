@@ -1,8 +1,9 @@
-export async function login(password) {
+export async function login(username, password) {
+    const body = username ? { username, password } : { password };
     const res = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password })
+        body: JSON.stringify(body)
     });
     return res.json();
 }
@@ -14,9 +15,10 @@ export async function logout() {
 export async function checkAuth() {
     try {
         const res = await fetch('/api/check-auth');
-        return res.ok;
+        if (!res.ok) return null;
+        return await res.json();
     } catch {
-        return false;
+        return null;
     }
 }
 
@@ -31,7 +33,8 @@ export async function fetchConfig() {
         title: "Buechsentelefon",
         stun_servers: [],
         branding: {},
-        legal: {}
+        legal: {},
+        has_users: false
     };
 }
 
